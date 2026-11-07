@@ -1,71 +1,89 @@
 # CloverChess
 
-A chess engine project built from scratch in Python. The board representation is **0x88** and the code uses only Python's standard library. No third-party chess package or engine is used.
+A from-scratch chess engine written in Python. CloverChess uses a **0x88 board representation** and only Python's standard library. It does not use `python-chess`, NumPy, an external chess engine, a neural network, or an opening database.
 
-## Current milestone: 0.2 — complete legal move generation and graphical interface
+## Current milestone: 0.3 — first thinking engine
 
-Implemented:
-- 128-cell 0x88 board and algebraic-coordinate conversion.
-- FEN parsing and serialization (six fields).
-- Move representation in UCI coordinate notation.
-- Pawn, knight, bishop, rook, queen and king movement.
-- Castling, promotion and en-passant.
-- Attack detection, check detection and legal-move filtering.
-- Reversible move application (`make_move` / `unmake_move`).
-- Perft and perft-divide utilities.
-- Interactive local two-player terminal interface with Unicode pieces.
-- Clickable graphical interface built with Python standard-library Tkinter: select/move pieces, legal-move hints, move history, undo, board flip, promotion selection, and FEN load/copy.
-- Commands: `moves`, `fen`, `undo`, `new`, `perft N`, `help`, `quit`.
-- Checkmate and stalemate detection through legal-move exhaustion plus check detection.
-- 25 unit tests, including known Perft reference positions.
+CloverChess can now choose and play moves by searching future variations.
 
-Not implemented yet:
-- Position evaluation and an AI opponent.
-- Search (Negamax, Alpha-Beta, iterative deepening, quiescence).
-- Transposition tables and move-ordering heuristics.
-- UCI protocol for GUI / external-engine matches.
+### The engine's brain
 
-## Project structure
+- **Handcrafted evaluation** (`evaluation.py`): material, piece-square activity, king placement for opening/endgame, bishop pair, rook files, and pawn structure (doubled, isolated and passed pawns).
+- **Negamax with Alpha-Beta pruning** (`engine.py`): explores the game tree while pruning branches that cannot improve the current result.
+- **Iterative deepening**: completes depth 1, then 2, then 3, and so on. If the time limit expires, it returns the best move from the last completed depth.
+- **Quiescence search**: extends tactical capture sequences at the horizon to reduce the horizon effect.
+- **Transposition table**: remembers previously searched positions and their bounds.
+- **Move ordering**: transposition-table move, captures ordered with a victim/attacker score, promotions, killer moves and history heuristic.
+- **Draw handling in search**: 50-move clock, common insufficient-material cases, and threefold repetition within the current search line.
+- **Time-bounded search**: configurable maximum depth and time per move.
 
-```text
-CloverChess/
-├── board.py          # 0x88 board, FEN, make/unmake, display
-├── move.py           # Move data structure and UCI notation
-├── movegen.py        # Pseudo-legal/legal moves and attack detection
-├── perft.py          # Move-generation validation
-├── main.py           # Terminal entry point and GUI launcher
-├── gui.py            # Tkinter graphical interface
-├── tests/
-│   ├── test_board.py
-│   └── test_movegen.py
-└── README.md
-```
+This is a classical search engine, not a database lookup. Chess's enormous game-tree estimate is not something we try to store. CloverChess calculates a manageable slice of the tree from the current position and evaluates the resulting positions.
 
-## Run
+### Play against CloverChess
 
-```bash
-python main.py
-```
-
-Launch the graphical board (Tkinter is part of Python's standard library; the Python installation must include Tcl/Tk):
+Graphical interface (Tkinter is part of Python's standard library):
 
 ```bash
 python main.py --gui
 ```
 
-Use ASCII symbols if the terminal does not render chess Unicode symbols:
+The GUI starts in **Play White (vs CloverChess)** mode. You can choose to play Black instead, or switch to Two Players. Engine strengths:
+
+- Quick: depth up to 3, about 0.45 seconds per move.
+- Standard: depth up to 4, about 1.35 seconds per move.
+- Strong: depth up to 5, about 3 seconds per move.
+
+The depth is a maximum, not a guarantee. The engine returns the last fully completed iteration when its time limit is reached. Its search runs in a worker thread, so the graphical interface remains responsive. The GUI reports depth, nodes, nodes per second, score and principal variation.
+
+Terminal game against CloverChess as Black:
 
 ```bash
-python main.py --ascii
+python main.py --vs-ai
 ```
 
-Start from a custom FEN:
+Change the search budget:
+
+```bash
+python main.py --vs-ai --ai-depth 5 --ai-time 3.0
+```
+
+Ask for a suggestion during a two-player terminal game with `hint`, or let CloverChess play the current side with `go`.
+
+Local two-player terminal game:
+
+```bash
+python main.py
+```
+
+Start from a custom six-field FEN:
 
 ```bash
 python main.py --fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 ```
 
-Moves are entered as coordinate strings, e.g. `e2e4`, `g1f3`, or `e7e8q` for promotion.
+Use ASCII pieces if the terminal does not render chess Unicode symbols:
+
+```bash
+python main.py --ascii
+```
+
+## Project structure
+
+```text
+CloverChess/
+├── board.py          # 0x88 board, FEN, reversible make/unmake
+├── move.py           # Move data structure and UCI notation
+├── movegen.py        # Legal moves, attacks, checks, special moves
+├── perft.py          # Move-generation validation
+├── evaluation.py     # Handcrafted positional evaluation
+├── engine.py         # Negamax, Alpha-Beta, quiescence, TT, ordering
+├── main.py           # Terminal entry point and AI play mode
+├── gui.py            # Tkinter GUI and human-vs-engine mode
+└── tests/
+    ├── test_board.py
+    ├── test_movegen.py
+    └── test_engine.py
+```
 
 ## Run tests
 
@@ -73,17 +91,17 @@ Moves are entered as coordinate strings, e.g. `e2e4`, `g1f3`, or `e7e8q` for pro
 python -m unittest discover -s tests -v
 ```
 
-## Perft validation
+The test suite includes board/FEN tests, move-generation tests and Perft reference positions, plus engine tests for legal move selection, position preservation, mate-in-one, capturing a checking queen, evaluation and terminal positions.
 
-In the interactive game, run `perft 3` to count all legal move sequences three plies deep. The initial position must return:
+## Current limitations / next work
 
-| Depth | Nodes |
-|---:|---:|
-| 1 | 20 |
-| 2 | 400 |
-| 3 | 8,902 |
-| 4 | 197,281 |
+CloverChess 0.3 is a functioning first AI, not yet a strong tournament engine. Search is still Python-level and modest-depth; the evaluation is handcrafted and deliberately simple. Search-line repetition is detected, but the engine does not yet receive the complete game history for full game-level repetition adjudication.
 
-No third-party packages are required.
+Planned improvements:
 
-The move generator is correct against the tested Perft reference positions, but it is not yet optimized for engine-strength search. CloverChess is still a rules-and-interface foundation: it does not yet evaluate positions or choose moves autonomously.
+1. Improve evaluation (mobility, king safety, threats, pawn terms and tapered phase scores).
+2. Improve search (aspiration windows, principal-variation search, check extensions, better pruning and faster move generation).
+3. Add a proper UCI protocol so CloverChess can play Stockfish through an external chess GUI.
+4. Build a match-testing harness and measure strength over many games, rather than judging it by a few positions.
+
+No external Python packages are required. Tkinter must be included in the local Python installation for the graphical interface.
